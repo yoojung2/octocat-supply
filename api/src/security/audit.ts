@@ -4,7 +4,6 @@ export const auditPrivilegedOperation: RequestHandler = (req, res, next) => {
   if (['POST', 'PUT', 'DELETE'].includes(req.method)) {
     console.info(JSON.stringify({
       event: 'api.privileged_operation',
-      actor: res.locals.principal?.id || 'unknown',
       method: req.method,
       path: req.originalUrl,
       statusCode: res.statusCode,
