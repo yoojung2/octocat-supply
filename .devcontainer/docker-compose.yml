@@ -1,4 +1,4 @@
-# Docker Compose File for Application Container with Docker bindings
+# Docker Compose File for Application Container
 version: "3.8"
 
 services:
@@ -9,8 +9,3 @@ services:
     ports:
       - "3000:3000"
       - "5137:5137"
-
-    volumes:
-      - type: bind
-        source: /var/run/docker.sock
-        target: /var/run/docker.sock

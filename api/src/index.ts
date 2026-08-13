@@ -2,6 +2,8 @@ import express from 'express';
 import swaggerJsdoc from 'swagger-jsdoc';
 import swaggerUi from 'swagger-ui-express';
 import cors from 'cors';
+import helmet from 'helmet';
+import { rateLimit } from 'express-rate-limit';
 import deliveryRoutes from './routes/delivery';
 import orderDetailDeliveryRoutes from './routes/orderDetailDelivery';
 import productRoutes from './routes/product';
@@ -12,35 +14,11 @@ import headquartersRoutes from './routes/headquarters';
 import supplierRoutes from './routes/supplier';
 import { initializeDatabase } from './init-db';
 import { errorHandler } from './utils/errors';
+import { requireApiKey } from './security/auth';
+import { auditPrivilegedOperation } from './security/audit';
+import { validateRequestBody } from './security/validation';
 
-const app = express();
 const port = process.env.PORT || 3000;
-
-// Parse CORS origins from environment variable if available
-const corsOrigins = process.env.API_CORS_ORIGINS
-  ? process.env.API_CORS_ORIGINS.split(',')
-  : [
-      'http://localhost:5137',
-      'http://localhost:3001',
-      'http://127.0.0.1:5137',
-      'http://127.0.0.1:3001',
-      // Allow all Codespace domains
-      /^https:\/\/.*\.app\.github\.dev$/,
-      // Allow all Azure Container Apps domains
-      /^https:\/\/.*\.azurecontainerapps\.io$/,
-    ];
-
-console.log('Configured CORS origins:', corsOrigins);
-
-// Enable CORS for the frontend
-app.use(
-  cors({
-    origin: corsOrigins,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-    credentials: true,
-  }),
-);
 
 const swaggerOptions = {
   definition: {
@@ -64,35 +42,74 @@ const swaggerOptions = {
   apis: ['./src/models/*.ts', './src/routes/*.ts'],
 };
 
-const swaggerDocs = swaggerJsdoc(swaggerOptions);
-app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocs));
+function parseCorsOrigins(): string[] {
+  return (process.env.API_CORS_ORIGINS || 'http://localhost:5137,http://localhost:3001,http://127.0.0.1:5137,http://127.0.0.1:3001')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter((origin) => origin && !origin.includes('*'));
+}
 
-app.get('/api-docs.json', (req, res) => {
-  res.setHeader('Content-Type', 'application/json');
-  res.send(swaggerDocs);
-});
+export function createApp(): express.Express {
+  const app = express();
+  const corsOrigins = parseCorsOrigins();
 
-app.use(express.json());
+  app.use(helmet());
+  app.use((req, _res, next) => {
+    req.setTimeout(Number(process.env.REQUEST_TIMEOUT_MS || 30000));
+    next();
+  });
 
-app.use('/api/deliveries', deliveryRoutes);
-app.use('/api/order-detail-deliveries', orderDetailDeliveryRoutes);
-app.use('/api/products', productRoutes);
-app.use('/api/order-details', orderDetailRoutes);
-app.use('/api/orders', orderRoutes);
-app.use('/api/branches', branchRoutes);
-app.use('/api/headquarters', headquartersRoutes);
-app.use('/api/suppliers', supplierRoutes);
+  app.use(
+    cors({
+      origin: corsOrigins,
+      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key'],
+      credentials: process.env.API_CORS_CREDENTIALS === 'true',
+    }),
+  );
 
-app.get('/', (req, res) => {
-  res.send('Hello, world!');
-});
+  app.use(rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: Number(process.env.API_RATE_LIMIT || 300),
+    standardHeaders: true,
+    legacyHeaders: false,
+  }));
 
-// Add error handling middleware
-app.use(errorHandler);
+  const swaggerDocs = swaggerJsdoc(swaggerOptions);
+  const swaggerEnabled = process.env.NODE_ENV !== 'production' || process.env.ENABLE_SWAGGER === 'true';
+  if (swaggerEnabled) {
+    app.use('/api-docs', requireApiKey, swaggerUi.serve, swaggerUi.setup(swaggerDocs));
+    app.get('/api-docs.json', requireApiKey, (req, res) => {
+      res.setHeader('Content-Type', 'application/json');
+      res.send(swaggerDocs);
+    });
+  }
+
+  app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '100kb' }));
+  app.use('/api', requireApiKey, auditPrivilegedOperation, validateRequestBody);
+
+  app.use('/api/deliveries', deliveryRoutes);
+  app.use('/api/order-detail-deliveries', orderDetailDeliveryRoutes);
+  app.use('/api/products', productRoutes);
+  app.use('/api/order-details', orderDetailRoutes);
+  app.use('/api/orders', orderRoutes);
+  app.use('/api/branches', branchRoutes);
+  app.use('/api/headquarters', headquartersRoutes);
+  app.use('/api/suppliers', supplierRoutes);
+
+  app.get('/', (req, res) => {
+    res.send('Hello, world!');
+  });
+
+  app.use(errorHandler);
+
+  return app;
+}
 
 // Initialize database and start server
 async function startServer() {
   try {
+    const app = createApp();
     console.log('🚀 Initializing database...');
     await initializeDatabase(true); // Always attempt seeding - the seeder checks if it's needed
     console.log('✅ Database initialized successfully');
@@ -107,4 +124,6 @@ async function startServer() {
   }
 }
 
-startServer();
+if (require.main === module) {
+  startServer();
+}

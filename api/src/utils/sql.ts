@@ -12,6 +12,46 @@ export interface QueryBuilder {
   offset?: number;
 }
 
+const allowedColumns: Record<string, Set<string>> = {
+  branches: new Set(['branch_id', 'headquarters_id', 'name', 'description', 'address', 'contact_person', 'email', 'phone']),
+  deliveries: new Set(['delivery_id', 'supplier_id', 'delivery_date', 'name', 'description', 'status']),
+  headquarters: new Set(['headquarters_id', 'name', 'description', 'address', 'contact_person', 'email', 'phone', 'city', 'country', 'floor_count', 'capacity']),
+  order_detail_deliveries: new Set(['order_detail_delivery_id', 'order_detail_id', 'delivery_id', 'quantity', 'notes']),
+  order_details: new Set(['order_detail_id', 'order_id', 'product_id', 'quantity', 'unit_price', 'notes']),
+  orders: new Set(['order_id', 'branch_id', 'order_date', 'name', 'description', 'status']),
+  products: new Set(['product_id', 'supplier_id', 'name', 'description', 'price', 'sku', 'unit', 'img_name', 'discount']),
+  suppliers: new Set(['supplier_id', 'name', 'description', 'contact_person', 'email', 'phone', 'active', 'verified']),
+};
+
+const allowedWhereClauses = new Set([
+  'branch_id = ?',
+  'delivery_id = ?',
+  'headquarters_id = ?',
+  'order_detail_delivery_id = ?',
+  'order_detail_id = ?',
+  'order_id = ?',
+  'product_id = ?',
+  'supplier_id = ?',
+]);
+
+function assertAllowedTable(table: string): void {
+  if (!allowedColumns[table]) {
+    throw new Error(`SQL table is not allowed: ${table}`);
+  }
+}
+
+function assertAllowedColumn(table: string, column: string): void {
+  if (column !== '*' && !allowedColumns[table]?.has(column)) {
+    throw new Error(`SQL column is not allowed: ${column}`);
+  }
+}
+
+function assertAllowedWhereClause(whereClause: string): void {
+  if (!allowedWhereClauses.has(whereClause)) {
+    throw new Error(`SQL where clause is not allowed: ${whereClause}`);
+  }
+}
+
 /**
  * Simple query builder for SELECT statements
  */
@@ -19,6 +59,7 @@ export class SelectQueryBuilder {
   private query: QueryBuilder;
 
   constructor(table: string) {
+    assertAllowedTable(table);
     this.query = {
       select: ['*'],
       from: table,
@@ -32,6 +73,7 @@ export class SelectQueryBuilder {
    * Specify columns to select
    */
   public select(columns: string[]): this {
+    columns.forEach((column) => assertAllowedColumn(this.query.from, column));
     this.query.select = columns;
     return this;
   }
@@ -40,6 +82,10 @@ export class SelectQueryBuilder {
    * Add JOIN clause
    */
   public join(table: string, condition: string, type: 'INNER' | 'LEFT' | 'RIGHT' = 'INNER'): this {
+    assertAllowedTable(table);
+    if (!/^[a-z_]+\.[a-z_]+ = [a-z_]+\.[a-z_]+$/.test(condition)) {
+      throw new Error(`SQL join condition is not allowed: ${condition}`);
+    }
     this.query.joins.push(`${type} JOIN ${table} ON ${condition}`);
     return this;
   }
@@ -48,6 +94,7 @@ export class SelectQueryBuilder {
    * Add WHERE condition
    */
   public where(condition: string): this {
+    assertAllowedWhereClause(condition);
     this.query.where.push(condition);
     return this;
   }
@@ -56,6 +103,7 @@ export class SelectQueryBuilder {
    * Add ORDER BY clause
    */
   public orderBy(column: string, direction: 'ASC' | 'DESC' = 'ASC'): this {
+    assertAllowedColumn(this.query.from, column);
     this.query.orderBy.push(`${column} ${direction}`);
     return this;
   }
@@ -174,8 +222,10 @@ export function buildInsertSQL<T extends Record<string, unknown>>(
   table: string,
   data: T,
 ): { sql: string; values: unknown[] } {
+  assertAllowedTable(table);
   const snakeCaseData = objectToSnakeCase(data);
   const columns = Object.keys(snakeCaseData);
+  columns.forEach((column) => assertAllowedColumn(table, column));
   const values = Object.values(snakeCaseData);
   const placeholders = generatePlaceholders(columns.length);
 
@@ -192,8 +242,11 @@ export function buildUpdateSQL<T extends Record<string, unknown>>(
   data: Partial<T>,
   whereClause: string,
 ): { sql: string; values: unknown[] } {
+  assertAllowedTable(table);
+  assertAllowedWhereClause(whereClause);
   const snakeCaseData = objectToSnakeCase(data as Record<string, unknown>);
   const columns = Object.keys(snakeCaseData);
+  columns.forEach((column) => assertAllowedColumn(table, column));
   const values = Object.values(snakeCaseData);
 
   const setClause = columns.map((col) => `${col} = ?`).join(', ');
