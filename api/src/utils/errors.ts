@@ -74,6 +74,26 @@ export function handleDatabaseError(error: unknown, entity?: string, id?: string
  * Express error handler middleware for database errors
  */
 export function errorHandler(error: unknown, _req: Request, res: Response, _next: NextFunction): void {
+  if (error instanceof SyntaxError && 'body' in error) {
+    res.status(400).json({
+      error: {
+        code: 'INVALID_JSON',
+        message: 'Request body must be valid JSON',
+      },
+    });
+    return;
+  }
+
+  if (error instanceof Error && (error as Error & { type?: string }).type === 'entity.too.large') {
+    res.status(413).json({
+      error: {
+        code: 'PAYLOAD_TOO_LARGE',
+        message: 'Request body is too large',
+      },
+    });
+    return;
+  }
+
   if (error instanceof DatabaseError) {
     res.status(error.statusCode).json({
       error: {
