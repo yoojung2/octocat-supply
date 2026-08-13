@@ -120,17 +120,24 @@ export function toCamelCase(str: string): string {
   return str.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
 }
 
+function mapObjectKeys(
+  obj: Record<string, unknown>,
+  keyMapper: (key: string) => string,
+): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+
+  for (const [key, value] of Object.entries(obj)) {
+    result[keyMapper(key)] = value;
+  }
+
+  return result;
+}
+
 /**
  * Convert object keys from camelCase to snake_case
  */
 export function objectToSnakeCase<T extends Record<string, unknown>>(obj: T): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
-
-  for (const [key, value] of Object.entries(obj)) {
-    result[toSnakeCase(key)] = value;
-  }
-
-  return result;
+  return mapObjectKeys(obj, toSnakeCase);
 }
 
 /**
@@ -142,13 +149,7 @@ export type DatabaseRow = Record<string, unknown>;
  * Convert object keys from snake_case to camelCase with typed output
  */
 export function objectToCamelCase<T>(obj: DatabaseRow): T {
-  const result: Record<string, unknown> = {};
-
-  for (const [key, value] of Object.entries(obj)) {
-    result[toCamelCase(key)] = value;
-  }
-
-  return result as T;
+  return mapObjectKeys(obj, toCamelCase) as T;
 }
 
 /**
